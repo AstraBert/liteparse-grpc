@@ -1,0 +1,213 @@
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package parser;
+
+option java_multiple_files = true;
+option java_outer_classname = "ParserProto";
+option java_package = "io.grpc.parser";
+
+// The Parser service definition.
+service ParserService {
+  // Parse a file
+  rpc Parse(ParseRequest) returns (ParseResponse) {}
+  // Screenshot the pages of a PDF file
+  rpc Screenshot(ScreenshotRequest) returns (ScreenshotResponse) {}
+  // Estimate the complexity of a file and the need for OCR
+  rpc IsComplex(IsComplexRequest) returns (IsComplexResponse) {}
+}
+
+// Configuration for LiteParse document parsing.
+message LiteParseConfig {
+  // OCR language code (Tesseract format: "eng", "fra", "deu", etc.).
+  string ocr_language = 1;
+
+  // Whether OCR is enabled. When true, runs on text-sparse pages and embedded images.
+  bool ocr_enabled = 2;
+
+  // HTTP OCR server URL (uses Tesseract if not provided)
+  optional string ocr_server_url = 3;
+
+  // Extra HTTP headers sent with every request to `ocr_server_url`.
+  // Ignored when `ocr_server_url` is unset.
+  repeated HttpHeader ocr_server_headers = 4;
+
+  // Path to tessdata directory. Falls back to TESSDATA_PREFIX env var if not set.
+  optional string tessdata_path = 5;
+
+  // Maximum number of pages to parse.
+  uint64 max_pages = 6;
+
+  // Specific pages to parse (e.g., "1-5,10,15-20"). Unset means all pages.
+  optional string target_pages = 7;
+
+  // DPI for rendering pages (used for OCR and screenshots).
+  float dpi = 8;
+
+  // Output format.
+  OutputFormat output_format = 9;
+
+  // Keep very small text that would normally be filtered out.
+  bool preserve_very_small_text = 10;
+
+  // Password for encrypted/protected documents.
+  optional string password = 11;
+
+  // Suppress progress output.
+  bool quiet = 12;
+
+  // Number of concurrent OCR workers. Defaults to (number of CPU cores - 1), minimum 1.
+  uint64 num_workers = 13;
+
+  // Controls how raster images are surfaced in markdown output. Has no
+  // effect on JSON / text outputs.
+  ImageMode image_mode = 14;
+
+  // Extract hyperlink annotations and render them as `[text](url)` in
+  // markdown output. Default on. Disable for benchmark parity with
+  // plain-text ground truth (the GT corpora never use link syntax).
+  bool extract_links = 15;
+
+  // Whether a systemic OCR failure (every OCR task failed *and* at least one
+  // was a text-sparse page whose primary text source was OCR) aborts the
+  // whole parse. Default `true`: surface the root cause instead of silently
+  // emitting blank pages. Set `false` to keep already-recovered native text
+  // and return partial results when OCR is unavailable — useful for callers
+  // that prefer a degraded document over a hard failure (e.g. when the host
+  // has its own OCR fallback or treats OCR as best-effort enrichment).
+  bool ocr_failure_fatal = 16;
+
+  // OCR request-hedging schedule (milliseconds) for the HTTP OCR engine.
+  // Empty (default) = no hedging. With multiple delays (e.g.
+  // `[0, 5000, 10000, 15000, 20000]`), each OCR attempt fires a duplicate
+  // request at every delay and takes the first to succeed — trading extra
+  // OCR-server load for lower tail latency on a slow/stuck pod. No effect on
+  // the Tesseract engine.
+  repeated uint64 ocr_hedge_delays_ms = 17;
+
+  // Emit per-word sub-boxes on each `TextItem` (`TextItem.words`). Default
+  // `false`: a text item already carries its own box, and word boxes roughly
+  // double the text-item payload (size + napi marshalling), so they are only
+  // worth computing for callers doing word-level bbox attribution. When
+  // `false`, `TextItem.words` is always empty and the per-word tracking is
+  // skipped entirely (zero allocation).
+  bool emit_word_boxes = 18;
+}
+
+// A single HTTP header as a name/value pair.
+message HttpHeader {
+  string name = 1;
+  string value = 2;
+}
+
+// Image handling for the markdown emitter.
+//
+// * OFF — strip image references entirely.
+// * PLACEHOLDER (default) — emit `![](image_pN_K.png)` references in
+//   reading order at each image's y position, but do not extract or
+//   return pixel bytes. Keeps response size small while letting the LLM see
+//   where figures live in the document.
+// * EMBED — same references, plus bytes returned via `ParseResult.images`.
+//   Opt-in because pixel bytes can dwarf the text payload on image-heavy
+//   PDFs. (Bytes plumbing lands in stage 11b — current variant is parsed but
+//   behaves like PLACEHOLDER until then.)
+enum ImageMode {
+  IMAGE_MODE_UNSPECIFIED = 0;
+  IMAGE_MODE_OFF = 1;
+  IMAGE_MODE_PLACEHOLDER = 2;
+  IMAGE_MODE_EMBED = 3;
+}
+
+// Supported output formats.
+enum OutputFormat {
+  OUTPUT_FORMAT_UNSPECIFIED = 0;
+  OUTPUT_FORMAT_JSON = 1;
+  OUTPUT_FORMAT_TEXT = 2;
+  OUTPUT_FORMAT_MARKDOWN = 3;
+}
+
+// Request to parse a file.
+message ParseRequest {
+  bytes file = 1;
+  optional LiteParseConfig config = 2;
+}
+
+// Request to screenshot the pages of a file.
+message ScreenshotRequest {
+  bytes file = 1;
+  optional LiteParseConfig config = 2;
+}
+
+message TextItem {
+  string text = 1;
+  float x = 2;
+  float y = 3;
+  float width = 4;
+  float height = 5;
+}
+
+message ParsedPage {
+  uint32 page_number = 1;
+  float page_width = 2;
+  float page_height = 3;
+  repeated TextItem text_items = 4;
+}
+
+// Response with a parsed file
+message ParseResponse {
+  string text = 1;
+  repeated ParsedPage pages = 2;
+}
+
+message ScreenshotPage {
+  bytes image_bytes = 1;
+  uint32 page_number = 2;
+  uint32 height = 3;
+  uint32 width = 4;
+  string mime_type = 5;
+}
+
+// Screenshot response for a PDF file
+message ScreenshotResponse {
+  repeated ScreenshotPage screenshots = 1;
+}
+
+// Request to estimate the complexity of a file.
+message IsComplexRequest {
+  bytes file = 1;
+  optional LiteParseConfig config = 2;
+}
+
+message PageComplexityStats {
+  uint32 page_number = 1;
+  uint64 text_length = 2;
+  float text_coverage = 3;
+  bool has_substantial_images = 4;
+  uint32 image_block_count = 5;
+  float image_coverage = 6;
+  float largest_image_coverage = 7;
+  bool full_page_image = 8;
+  optional float uncoverted_vector_area = 9;
+  bool is_garbled = 10;
+  float page_area = 11;
+  bool needs_ocr = 12;
+  repeated string reasons = 13;
+}
+
+// Response detailing the complexity estimation for a file
+message IsComplexResponse {
+  repeated PageComplexityStats complexity = 1;
+}
