@@ -3,6 +3,10 @@ name: Docker CI
 on:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - crates/grpc/src/client.rs
+      - README.md
+      - .github/workflows/docker-publish.yml
 
 jobs:
   build-docker-image:

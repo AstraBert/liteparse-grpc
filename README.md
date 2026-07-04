@@ -154,7 +154,7 @@ A multi-stage `Dockerfile` is included for containerized deployment.
 ### Pull from the GitHub Container registry
 
 ```bash
-docker pull ghcr.io/run-llama/liteparse-grpc:main
+docker pull ghcr.io/astrabert/liteparse-grpc:main
 ```
 
 ### Build

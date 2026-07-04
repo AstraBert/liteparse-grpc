@@ -4,6 +4,10 @@ on:
   push:
     tags: ["v*.*.*"]
     branches: [main]
+    paths-ignore:
+      - crates/grpc/src/client.rs
+      - README.md
+      - .github/workflows/docker-ci.yml
 
 env:
   REGISTRY: ghcr.io

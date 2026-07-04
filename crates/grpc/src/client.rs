@@ -111,17 +111,18 @@ enum Command {
 struct Args {
     #[command(subcommand)]
     cmd: Command,
+    #[arg(short, long, default_value_t = 50051)]
+    port: u64,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let channel = Channel::from_static("http://0.0.0.0:50054")
-        .connect()
-        .await?;
+    let args = Args::parse();
+    let addr = format!("http://localhost:{:?}", args.port);
+    let channel = Channel::from_shared(addr)?.connect().await?;
     let grpc_client = definitions::parser::parser_service_client::ParserServiceClient::new(channel)
         .max_decoding_message_size(30 * 1024 * 1024)
         .max_encoding_message_size(30 * 1024 * 1024);
-    let args = Args::parse();
     match args.cmd {
         Command::Parse {
             file,
